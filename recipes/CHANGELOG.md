@@ -1,3 +1,6 @@
+## 2.3.0
+- Add a companion HACS integration (`ha_recipes`) exposing three response-returning services for conversational agents: `ha_recipes.search` (find saved recipes by name), `ha_recipes.scrape_url` (import a recipe from a web URL, returning the parsed recipe and Storage matches), and `ha_recipes.suggest_from_stock` (suggest recipes cookable right now from current Storage stock, with an optional expiring-only filter). The integration auto-discovers the Recipes and Storage add-ons via the Supervisor API; no entities are added.
+
 ## 2.2.12
 - Recipe status calc now walks children stock for strict matches that landed on a top-level parent product (parent_id=null). The 2.2.11 scrape-time fix demoted those to loose, but pre-2.2.11 recipes are still stored as `specificity="strict"` and would have stayed red until re-scrape. This view-time change auto-recovers them. Strict-on-CHILD (parent_id != null) keeps the no-aggregation semantic — gouda still does not satisfy strict parmesan.
 
