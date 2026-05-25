@@ -1,0 +1,59 @@
+search:
+  name: Search recipes
+  description: >
+    Search saved recipes by name or ingredient. Returns the matching recipes
+    (id, name, servings). Use this to find a recipe the household has saved
+    before, e.g. "do we have a pannukakku recipe".
+  fields:
+    query:
+      name: Query
+      description: Text to match against saved recipe names (case-insensitive).
+      required: true
+      example: pannukakku
+      selector:
+        text:
+
+scrape_url:
+  name: Import recipe from URL
+  description: >
+    Import a recipe from a web URL; returns the parsed recipe (name, servings,
+    ingredients, instructions) and which Storage products match its ingredients.
+    Runs the full AI scrape-and-match pipeline and can take up to a minute.
+  fields:
+    url:
+      name: Recipe URL
+      description: The web address of the recipe page to import.
+      required: true
+      example: https://www.example.com/recipes/pannukakku
+      selector:
+        text:
+
+suggest_from_stock:
+  name: Suggest recipes from stock
+  description: >
+    Suggest recipes you can cook RIGHT NOW from what is in stock. Example:
+    "what can I cook tonight" or "what can I make with what is expiring". Set
+    expiring_only to prioritise items about to go off. Needs no input — it reads
+    your Storage stock.
+  fields:
+    expiring_only:
+      name: Expiring only
+      description: >
+        Only suggest recipes that use at least one ingredient about to expire.
+      required: false
+      default: false
+      example: true
+      selector:
+        boolean:
+    days:
+      name: Expiry window (days)
+      description: >
+        How many days ahead counts as "expiring" when expiring_only is on.
+        Defaults to 7.
+      required: false
+      example: 3
+      selector:
+        number:
+          min: 1
+          max: 60
+          mode: box

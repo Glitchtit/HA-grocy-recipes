@@ -1,0 +1,55 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Recipes add-on",
+        "description": "Confirm the URL of the HA-recipes add-on backend. The HA-storage add-on is auto-discovered.",
+        "data": {
+          "addon_url": "HA-recipes add-on URL"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the HA-recipes add-on at that URL."
+    },
+    "abort": {
+      "already_configured": "HA-recipes is already configured."
+    }
+  },
+  "services": {
+    "search": {
+      "name": "Search recipes",
+      "description": "Search saved recipes by name or ingredient.",
+      "fields": {
+        "query": {
+          "name": "Query",
+          "description": "Text to match against saved recipe names."
+        }
+      }
+    },
+    "scrape_url": {
+      "name": "Import recipe from URL",
+      "description": "Import a recipe from a web URL and return the parsed recipe and Storage matches.",
+      "fields": {
+        "url": {
+          "name": "Recipe URL",
+          "description": "The web address of the recipe page to import."
+        }
+      }
+    },
+    "suggest_from_stock": {
+      "name": "Suggest recipes from stock",
+      "description": "Suggest recipes you can cook right now from what is in stock.",
+      "fields": {
+        "expiring_only": {
+          "name": "Expiring only",
+          "description": "Only suggest recipes that use an ingredient about to expire."
+        },
+        "days": {
+          "name": "Expiry window (days)",
+          "description": "How many days ahead counts as expiring. Defaults to 7."
+        }
+      }
+    }
+  }
+}
