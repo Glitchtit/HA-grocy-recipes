@@ -20,3 +20,11 @@ def filter_recipes_by_query(
     if not q:
         return recipes
     return [r for r in recipes if q in (r.get("name") or "").lower()]
+
+
+async def run_scrape(recipes_client: Any, url: str) -> dict[str, Any]:
+    """Proxy a scrape request and return the parsed recipe + Storage matches.
+
+    `recipes_client` must expose an async `scrape(url) -> dict`.
+    """
+    return await recipes_client.scrape(url)

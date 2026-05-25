@@ -19,14 +19,16 @@ from .const import (
     CONF_ADDON_URL,
     DOMAIN,
     RECIPES_PORT,
+    SERVICE_SCRAPE_URL,
     SERVICE_SEARCH,
 )
 from .discovery import discover_addon_url
-from .helpers import filter_recipes_by_query
+from .helpers import filter_recipes_by_query, run_scrape
 
 _LOGGER = logging.getLogger(__name__)
 
 SEARCH_SCHEMA = vol.Schema({vol.Required("query"): str})
+SCRAPE_SCHEMA = vol.Schema({vol.Required("url"): str})
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -62,10 +64,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         matched = filter_recipes_by_query(all_recipes, call.data["query"])
         return {"count": len(matched), "recipes": matched}
 
+    async def _scrape_service(call: ServiceCall) -> dict:
+        if recipes is None:
+            raise HomeAssistantError(
+                "HA-recipes add-on was not auto-discovered; cannot scrape."
+            )
+        try:
+            return await run_scrape(recipes, call.data["url"])
+        except Exception as exc:  # noqa: BLE001
+            raise HomeAssistantError(f"Scrape failed: {exc}") from exc
+
     if not hass.services.has_service(DOMAIN, SERVICE_SEARCH):
         hass.services.async_register(
             DOMAIN, SERVICE_SEARCH, _search_service,
             schema=SEARCH_SCHEMA, supports_response=SupportsResponse.ONLY,
+        )
+    if not hass.services.has_service(DOMAIN, SERVICE_SCRAPE_URL):
+        hass.services.async_register(
+            DOMAIN, SERVICE_SCRAPE_URL, _scrape_service,
+            schema=SCRAPE_SCHEMA, supports_response=SupportsResponse.ONLY,
         )
 
     return True
@@ -75,4 +92,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     if not hass.data.get(DOMAIN):
         hass.services.async_remove(DOMAIN, SERVICE_SEARCH)
+        hass.services.async_remove(DOMAIN, SERVICE_SCRAPE_URL)
     return True
