@@ -30,25 +30,6 @@ async def run_scrape(recipes_client: Any, url: str) -> dict[str, Any]:
     return await recipes_client.scrape(url)
 
 
-def pantry_ids_from_stock(stock: list[dict[str, Any]]) -> set[int]:
-    """Set of product_ids that are currently in stock.
-
-    Reads HA-storage `GET /api/stock` summaries. That endpoint already returns
-    only active products with total amount > 0, but we defensively exclude rows
-    with a non-positive ``amount`` and rows without a numeric ``product_id``.
-    """
-    ids: set[int] = set()
-    for row in stock or []:
-        pid = row.get("product_id")
-        if pid is None:
-            continue
-        amount = row.get("amount")
-        if amount is not None and amount <= 0:
-            continue
-        ids.add(int(pid))
-    return ids
-
-
 def expiring_ids_from_entries(entries: list[dict[str, Any]]) -> set[int]:
     """Set of product_ids that have at least one lot expiring soon.
 

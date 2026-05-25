@@ -39,7 +39,7 @@ SCRAPE_SCHEMA = vol.Schema({vol.Required("url"): str})
 SUGGEST_SCHEMA = vol.Schema(
     {
         vol.Optional("expiring_only", default=False): bool,
-        vol.Optional("days"): vol.Coerce(int),
+        vol.Optional("days"): vol.All(vol.Coerce(int), vol.Range(min=1, max=60)),
     }
 )
 

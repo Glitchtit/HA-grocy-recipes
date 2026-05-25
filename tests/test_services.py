@@ -54,9 +54,6 @@ class FakeStorage:
         self._stock = stock or []
         self._expiring = expiring or []
 
-    async def fetch_stock(self):
-        return self._stock
-
     async def fetch_expiring_entries(self, days):
         self._days = days
         return self._expiring

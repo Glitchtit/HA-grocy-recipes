@@ -1,8 +1,6 @@
 """Lightweight client for the HA-storage add-on (stock lookups).
 
 Routes (confirmed against HA-storage/storage/app/routers/stock.py):
-  GET /api/stock                              -> list[StockSummary]
-      (only active products with total_amount > 0 -> "in stock")
   GET /api/stock/entries?expiring_within_days -> list[StockEntryWithProduct]
 """
 from __future__ import annotations
@@ -26,13 +24,6 @@ def _as_list(data: Any) -> list[dict[str, Any]]:
 class StorageClient:
     def __init__(self, base_url: str) -> None:
         self.base_url = base_url.rstrip("/")
-
-    async def fetch_stock(self) -> list[dict[str, Any]]:
-        """Aggregated in-stock summaries (one row per active product in stock)."""
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(f"{self.base_url}/api/stock")
-            r.raise_for_status()
-            return _as_list(r.json())
 
     async def fetch_expiring_entries(self, days: int) -> list[dict[str, Any]]:
         """Stock lots whose best_before_date falls within `days` days."""

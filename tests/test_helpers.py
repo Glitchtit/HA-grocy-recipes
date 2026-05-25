@@ -39,26 +39,10 @@ def test_filter_recipes_by_query_no_match_returns_empty():
 
 # --- suggest_from_stock helpers ---
 
-STOCK = [
-    {"product_id": 10, "product_name": "Maito", "amount": 2.0},
-    {"product_id": 11, "product_name": "Jauho", "amount": 1.0},
-    {"product_id": 12, "product_name": "Voi", "amount": 0.5},
-]
-
 EXPIRING_ENTRIES = [
     {"product_id": 10, "best_before_date": "2026-05-26", "amount": 1.0},
     {"product_id": 99, "best_before_date": "2026-05-27", "amount": 1.0},
 ]
-
-
-def test_pantry_ids_from_stock():
-    assert helpers.pantry_ids_from_stock(STOCK) == {10, 11, 12}
-
-
-def test_pantry_ids_from_stock_skips_missing_and_zero():
-    rows = [{"product_id": None}, {"foo": 1}, {"product_id": 7, "amount": 0}]
-    # amount<=0 should be excluded (defensive; /api/stock already filters >0)
-    assert helpers.pantry_ids_from_stock(rows) == set()
 
 
 def test_expiring_ids_from_entries():
