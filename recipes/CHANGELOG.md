@@ -1,3 +1,10 @@
+## 2.4.0
+
+- Ingredient availability now comes from Storage's new availability endpoint (recursive stock aggregation, pack sizes, staples)
+- Recipe variants ("cheddar" under "Juusto") are created as tree nodes; bought SKUs link underneath them
+- Pack-size conversions moved to Storage — created at product creation instead of scrape time
+- Every scrape triggers Storage's linker sweep so products and recipes converge regardless of creation order
+
 ## 2.3.0
 - Add a companion HACS integration (`ha_recipes`) exposing three response-returning services for conversational agents: `ha_recipes.search` (find saved recipes by name), `ha_recipes.scrape_url` (import a recipe from a web URL, returning the parsed recipe and Storage matches), and `ha_recipes.suggest_from_stock` (suggest recipes cookable right now from current Storage stock, with an optional expiring-only filter). The integration auto-discovers the Recipes and Storage add-ons via the Supervisor API; no entities are added.
 

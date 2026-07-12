@@ -446,8 +446,10 @@ class TestCreateChildStubsForUnmatchedSpecifics:
 
     def test_climbs_when_matched_product_is_a_child(self, monkeypatch):
         """When the matched product is itself a child (e.g. Sokeri is a child
-        of Makeutusaineet), the new variant stub should land as a sibling of
-        the matched product (under the grandparent), not as a grandchild."""
+        of Makeutusaineet), the new variant stub must now land UNDER the
+        matched child (grandchild depth) rather than climbing to the
+        grandparent — with a recursive tree, the variant belongs under
+        whatever node it was actually matched to."""
         products = [
             {"id": 5, "name": "Makeutusaineet", "parent_id": None, "unit_id": 4, "location_id": 1, "product_group_id": 7},
             {"id": 10, "name": "Sokeri", "parent_id": 5, "unit_id": 4, "location_id": 1, "product_group_id": 7},
@@ -469,113 +471,87 @@ class TestCreateChildStubsForUnmatchedSpecifics:
         assert created == {200}
         assert len(posts) == 1
         _path, body = posts[0]
-        # Stub created under Makeutusaineet (id=5), not under Sokeri (id=10)
-        assert body["parent_id"] == 5
+        # Stub created under the matched Sokeri (id=10), not the grandparent (id=5)
+        assert body["parent_id"] == 10
         assert body["name"] == "hillosokeri"
         assert ingredients[0]["_product_id"] == 200
         assert ingredients[0]["_specificity"] == "strict"
 
 
-class TestRecipeDetailStrictOnParentAggregates:
-    """`_get_recipe_detail` must aggregate children stock when a strict match
-    landed on a top-level parent product (parent_id=None). This recovers the
-    Punasipuli rabarberpaj case without re-scraping: the AI emitted
-    specific="punasipuli", the matcher bound the parent "Punasipuli" strictly
-    (pre-2.2.11 behaviour, still in stored recipes), and the user's child
-    products like "Punasipuli 500g Suomi 2lk" have the actual stock.
+class TestRecipeDetailDelegatesAvailability:
+    """`_get_recipe_detail` no longer computes stock status itself — it merges
+    the recipe with Storage's `GET recipes/{id}/availability` payload, which is
+    the single source of truth for status (Task 7, recursive stock
+    aggregation + pack sizes now live in Storage)."""
 
-    Strict-on-CHILD (parent_id != None) must still ignore siblings.
-    """
-
-    def _setup(self, monkeypatch, *, ingredient, recipe_unit_id, products, stock):
+    def _setup(self, monkeypatch, *, ingredient, availability_status):
         recipe_payload = {
-            "id": 99,
-            "name": "Test Recipe",
-            "description": "",
-            "source_url": "",
-            "servings": 1,
-            "picture_filename": None,
-            "ingredients": [
-                {
-                    **ingredient,
-                    "unit_id": recipe_unit_id,
-                    "unit_abbreviation": "kpl",
-                }
-            ],
+            "id": 99, "name": "Test Recipe", "description": "Step one\nStep two",
+            "source_url": "", "servings": 1, "picture_filename": None,
+            "ingredients": [{**ingredient, "unit_id": 8, "unit_abbreviation": "kpl"}],
+        }
+        avail_payload = {"recipe_id": 99, "ingredients": [{
+            "ingredient_id": ingredient["id"], "product_id": ingredient["product_id"],
+            "product_name": "X", "parent_id": None, "amount_needed": 2,
+            "unit_id": 8, "unit_abbrev": "kpl", "specificity": "loose",
+            "status": availability_status, "available": 0}]}
+
+        def fake_api_get(path: str, **_kwargs):
+            if path == "recipes/99":
+                return recipe_payload
+            if path == "recipes/99/availability":
+                return avail_payload
+            return []
+
+        monkeypatch.setattr(backend, "_api_get", fake_api_get)
+
+    def test_status_comes_from_storage(self, monkeypatch):
+        self._setup(monkeypatch,
+                    ingredient={"id": 1, "product_id": 5, "amount": 2, "note": "",
+                                "specificity": "loose", "product_name": "X"},
+                    availability_status="green")
+        detail = backend._get_recipe_detail(99)
+        assert detail["ingredients"][0]["status"] == "green"
+        assert detail["instructions"] == ["Step one", "Step two"]
+
+    def test_missing_availability_row_defaults_red(self, monkeypatch):
+        self._setup(monkeypatch,
+                    ingredient={"id": 1, "product_id": 5, "amount": 2, "note": "",
+                                "specificity": "loose", "product_name": "X"},
+                    availability_status="green")
+
+        # availability payload covers nothing → ingredient defaults to red
+        def fake(path, **k):
+            if path == "recipes/99/availability":
+                return {"recipe_id": 99, "ingredients": []}
+            return {
+                "id": 99, "name": "r", "description": "", "source_url": "",
+                "servings": 1, "picture_filename": None,
+                "ingredients": [{"id": 1, "product_id": 5, "amount": 2, "note": "",
+                                 "specificity": "loose", "product_name": "X",
+                                 "unit_id": 8, "unit_abbreviation": "kpl"}]}
+        monkeypatch.setattr(backend, "_api_get", fake)
+        detail = backend._get_recipe_detail(99)
+        assert detail["ingredients"][0]["status"] == "red"
+
+    def test_availability_fetch_failure_degrades_to_red(self, monkeypatch):
+        """If Storage's availability endpoint errors, the detail view must
+        still render (status red) instead of raising."""
+        recipe_payload = {
+            "id": 99, "name": "Test Recipe", "description": "",
+            "source_url": "", "servings": 1, "picture_filename": None,
+            "ingredients": [{"id": 1, "product_id": 5, "amount": 2, "note": "",
+                             "specificity": "loose", "product_name": "X",
+                             "unit_id": 8, "unit_abbreviation": "kpl"}],
         }
 
         def fake_api_get(path: str, **_kwargs):
             if path == "recipes/99":
                 return recipe_payload
-            if path == "stock":
-                return stock
-            if path.startswith("products"):
-                return products
-            if path == "conversions":
-                return []
+            if path == "recipes/99/availability":
+                raise RuntimeError("storage unreachable")
             return []
 
         monkeypatch.setattr(backend, "_api_get", fake_api_get)
-
-    def test_strict_on_parent_aggregates_children(self, monkeypatch):
-        """specificity=strict + matched a parent (parent_id=None) → walks
-        children's stock. Recovers pre-2.2.11 stored bindings."""
-        products = [
-            {"id": 100, "name": "Punasipuli", "parent_id": None, "unit_id": 8},
-            {"id": 101, "name": "Punasipuli 500g Suomi 2lk", "parent_id": 100, "unit_id": 8},
-            {"id": 102, "name": "Punasipuli Lavanttila", "parent_id": 100, "unit_id": 8},
-        ]
-        stock = [
-            {"product_id": 101, "amount": 1, "amount_opened": 0},
-            {"product_id": 102, "amount": 1, "amount_opened": 0},
-        ]
-        self._setup(
-            monkeypatch,
-            ingredient={
-                "id": 1, "product_id": 100, "product_name": "Punasipuli",
-                "amount": 1, "specificity": "strict", "note": "",
-            },
-            recipe_unit_id=8,
-            products=products,
-            stock=stock,
-        )
-
         detail = backend._get_recipe_detail(99)
-        row = detail["ingredients"][0]
-        assert row["product_id"] == 100
-        assert row["specificity"] == "strict"
-        assert row["status"] == "green", (
-            f"Expected green (2 kpl aggregated from children ≥ 1 kpl needed), got {row['status']}"
-        )
-
-    def test_strict_on_child_does_not_aggregate_siblings(self, monkeypatch):
-        """specificity=strict + matched a child (parent_id != None) → no
-        aggregation, preserving the 'this exact variant only' semantic."""
-        products = [
-            {"id": 1, "name": "Juusto", "parent_id": None, "unit_id": 1},
-            {"id": 2, "name": "Parmesan", "parent_id": 1, "unit_id": 1},
-            {"id": 3, "name": "Gouda", "parent_id": 1, "unit_id": 1},
-        ]
-        stock = [
-            # No parmesan stock; lots of gouda. Strict on parmesan must
-            # NOT count gouda.
-            {"product_id": 3, "amount": 500, "amount_opened": 0},
-        ]
-        self._setup(
-            monkeypatch,
-            ingredient={
-                "id": 1, "product_id": 2, "product_name": "Parmesan",
-                "amount": 100, "specificity": "strict", "note": "",
-            },
-            recipe_unit_id=1,
-            products=products,
-            stock=stock,
-        )
-
-        detail = backend._get_recipe_detail(99)
-        row = detail["ingredients"][0]
-        assert row["product_id"] == 2
-        assert row["specificity"] == "strict"
-        assert row["status"] == "red", (
-            f"Expected red (gouda is a sibling, must not satisfy strict parmesan), got {row['status']}"
-        )
+        assert detail["ingredients"][0]["status"] == "red"

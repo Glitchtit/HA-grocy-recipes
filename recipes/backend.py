@@ -535,134 +535,6 @@ def _derive_density_conversions(
     return derived
 
 
-def _create_product_conversions(
-    matched_ingredients: list[dict], products_by_id: dict[int, dict],
-    *, skip_product_ids: set[int] | None = None,
-) -> None:
-    """Use Gemini AI to determine product package sizes and create conversions.
-
-    For each matched product, analyse the product name to determine the package
-    size (e.g. "Arla Kevytmaito 1L" → 1 piece = 1 litre) and create a
-    product-specific unit conversion in Storage.
-
-    Products in *skip_product_ids* (e.g. stubs with no package info) are skipped.
-    """
-    umap = _get_unit_map()
-    if not umap:
-        return
-
-    _skip = skip_product_ids or set()
-
-    # Collect products that need conversions
-    products_to_check = []
-    for ing in matched_ingredients:
-        pid = ing.get("_product_id")
-        recipe_unit = _canonical_abbrev(ing.get("unit"))
-        if pid is None or recipe_unit is None or recipe_unit == "kpl":
-            continue
-        pid = int(pid)
-        if pid in _skip:
-            continue
-        prod = products_by_id.get(pid, {})
-        products_to_check.append({
-            "product_id": pid,
-            "product_name": prod.get("name", ""),
-            "recipe_unit": recipe_unit,
-        })
-
-    if not products_to_check:
-        return
-
-    # Check which products already have conversions
-    existing_conversions = _api_get("conversions")
-    products_with_conv: set[int] = set()
-    for c in existing_conversions:
-        cpid = c.get("product_id")
-        if cpid is not None:
-            products_with_conv.add(int(cpid))
-
-    need_conv = [p for p in products_to_check if p["product_id"] not in products_with_conv]
-    if not need_conv:
-        return
-
-    # Deduplicate by product_id
-    seen_pids: set[int] = set()
-    unique_need: list[dict] = []
-    for p in need_conv:
-        if p["product_id"] not in seen_pids:
-            seen_pids.add(p["product_id"])
-            unique_need.append(p)
-
-    product_list = json.dumps(
-        [{"product_id": p["product_id"], "name": p["product_name"]} for p in unique_need],
-        ensure_ascii=False,
-    )
-
-    prompt = f"""Analyse these Finnish grocery product names and determine the package size for each.
-
-Products:
-{product_list}
-
-For each product, determine:
-1. The quantity in the package (e.g. "Arla Kevytmaito 1L" → amount: 1, unit: "l")
-2. The unit of measurement (g, kg, ml, dl, l)
-
-Return a JSON array:
-[{{"product_id": <id>, "amount": <number>, "unit": "g"|"kg"|"ml"|"dl"|"l"|null}}]
-
-RULES:
-- Look for size indicators in the product name (e.g. "1L", "500g", "2kg", "200ml")
-- Finnish products commonly use: g, kg, dl, l, ml
-- If the name contains NO size information, return unit: null
-- Common Finnish package sizes: milk 1L, flour 2kg, butter 500g, cream 2dl
-- "tölkki" / "tlk" usually means a can (330ml for drinks, 400ml/400g for canned goods)
-- Be precise — "500g" means amount: 500, unit: "g" — NOT amount: 0.5, unit: "kg"
-- If multiple sizes appear, use the LAST/most specific one"""
-
-    result = _call_ai_json(prompt)
-    if not result or not isinstance(result, list):
-        log.warning("Gemini failed to determine product package sizes")
-        return
-
-    piece_id = umap.get("piece") or umap.get("kpl")
-    if piece_id is None:
-        # Try to find a "Piece" unit from existing units
-        all_units = _api_get("units")
-        for u in all_units:
-            name_lower = (u.get("name") or "").lower()
-            if name_lower in ("piece", "pack", "kappale", "stück"):
-                piece_id = u["id"]
-                break
-    if piece_id is None:
-        log.warning("Cannot create product conversions — no Piece unit found")
-        return
-
-    for item in result:
-        pid = item.get("product_id")
-        amount = item.get("amount")
-        unit_abbrev = item.get("unit")
-        if pid is None or amount is None or unit_abbrev is None:
-            continue
-
-        to_unit_id = umap.get(unit_abbrev)
-        if to_unit_id is None:
-            continue
-
-        try:
-            _api_post("conversions", {
-                "from_unit_id": piece_id,
-                "to_unit_id": to_unit_id,
-                "factor": float(amount),
-                "product_id": int(pid),
-            })
-            log.debug(
-                "Created conversion for product %d: 1 piece = %s %s",
-                pid, amount, unit_abbrev,
-            )
-        except Exception as exc:
-            log.warning("Failed to create conversion for product %d: %s", pid, exc)
-
-
 def _update_product_default_units(
     matched_ingredients: list[dict], products_by_id: dict[int, dict]
 ) -> None:
@@ -1830,16 +1702,10 @@ def _create_child_stubs_for_unmatched_specifics(
         if not parent:
             continue
 
-        # If the matched product is itself a child (e.g., Sokeri is a child of
-        # Makeutusaineet), climb to its parent so the new stub lands as a
-        # sibling of the matched product rather than a grandchild.
-        if parent.get("parent_id") is not None:
-            grand_id = int(parent["parent_id"])
-            grandparent = by_id.get(grand_id)
-            if not grandparent:
-                continue
-            parent_id = grand_id
-            parent = grandparent
+        # With a recursive product tree, the variant stub belongs directly
+        # under the matched node — whatever its depth — not climbed up to a
+        # grandparent. (e.g. Sokeri is itself a child of Makeutusaineet; a
+        # "hillosokeri" variant stub still lands under Sokeri.)
 
         spec_key = specific.lower().strip()
         existing_child = children_by_parent.get(parent_id, {}).get(spec_key)
@@ -2020,161 +1886,35 @@ def _list_recipes() -> list[dict]:
 
 
 def _get_recipe_detail(recipe_id: int) -> dict:
-    """Get full recipe detail with ingredient stock status."""
+    """Recipe detail for the frontend. Availability status is computed by
+    Storage (GET recipes/{id}/availability) — single source of truth."""
     recipe = _api_get(f"recipes/{recipe_id}")
 
-    # Storage returns ingredients with stock info included
-    recipe_ingredients = recipe.get("ingredients", [])
-
-    # Get stock info for additional status calculation
-    stock = _api_get("stock")
-    stock_by_product: dict[int, dict] = {}
-    for s in stock:
-        stock_by_product[s["product_id"]] = s
-
-    # Get all products for parent lookups (include inactive parents so
-    # recipe ingredients pointing to inactive group-master parents can be
-    # resolved for unit info and stock aggregation).
-    products_list = _api_get("products?active_only=false")
-    products_by_id = {p["id"]: p for p in products_list}
-
-    # Get all conversions for stock comparison
-    all_conversions = _api_get("conversions")
-
-    # Build parent→children map for stock aggregation
-    children_of: dict[int, list[int]] = {}
-    for p in products_list:
-        ppid = p.get("parent_id")
-        if ppid:
-            children_of.setdefault(int(ppid), []).append(p["id"])
+    by_ingredient: dict[int, dict] = {}
+    try:
+        avail = _api_get(f"recipes/{recipe_id}/availability")
+        by_ingredient = {
+            a["ingredient_id"]: a for a in avail.get("ingredients", [])
+        }
+    except Exception as exc:
+        log.warning("Availability fetch failed for recipe %d: %s", recipe_id, exc)
 
     ingredients = []
-    for pos in recipe_ingredients:
-        pid = pos.get("product_id")
-        product = products_by_id.get(pid, {})
-        product_name = pos.get("product_name") or product.get("name", f"Product #{pid}")
-        needed = pos.get("amount") or 0
-        recipe_unit_id = pos.get("unit_id")
-        specificity = pos.get("specificity", "loose")
-        # Aggregate children stock when:
-        #   • loose match (any sibling under the parent is acceptable), OR
-        #   • strict match landed on a TOP-LEVEL PARENT product (the recipe's
-        #     `specific` value matched the parent's name exactly — e.g.
-        #     specific="punasipuli" → parent product "Punasipuli". Children
-        #     like "Punasipuli 500g Suomi 2lk" are variants of the same
-        #     thing, so their stock should satisfy the requirement).
-        # Strict-on-CHILD (parent_id != None) preserves the no-aggregation
-        # semantic: that case is a genuine "this exact variant only".
-        aggregate_children = (
-            specificity != "strict"
-            or product.get("parent_id") is None
-        )
-
-        stock_entry = stock_by_product.get(pid)
-        in_stock_pieces = 0
-        amount_opened = 0
-        if stock_entry:
-            in_stock_pieces = stock_entry.get("amount", 0)
-            amount_opened = stock_entry.get("amount_opened", 0)
-
-        # "To taste" ingredients: green if any in stock, yellow if none
-        if needed == 0:
-            any_child_in_stock = aggregate_children and any(
-                stock_by_product.get(cid, {}).get("amount", 0) > 0
-                for cid in children_of.get(pid, [])
-            )
-            if in_stock_pieces > 0 or any_child_in_stock:
-                status = "green"
-            else:
-                status = "yellow"
-            ingredients.append({
-                "id": pos.get("id"),
-                "product_id": pid,
-                "product_name": product_name,
-                "parent_id": product.get("parent_id"),
-                "parent_name": None,
-                "amount_needed": 0,
-                "unit_abbrev": "",
-                "note": pos.get("note", ""),
-                "specificity": specificity,
-                "status": status,
-            })
-            continue
-
-        # Aggregate child stock only for loose ingredients (strict matches must
-        # consume exactly the linked product, not a sibling under the same parent).
-        child_stock_converted = None
-        if aggregate_children and in_stock_pieces == 0 and pid in children_of:
-            for cid in children_of[pid]:
-                cstock = stock_by_product.get(cid)
-                if not cstock or cstock.get("amount", 0) == 0:
-                    continue
-                child_amount = cstock.get("amount", 0)
-                child_product = products_by_id.get(cid, {})
-                child_unit_id = child_product.get("unit_id")
-                amount_opened += cstock.get("amount_opened", 0)
-                if recipe_unit_id and child_unit_id:
-                    converted = _convert_recipe_to_stock(
-                        child_amount, child_unit_id, cid, recipe_unit_id,
-                        all_conversions,
-                    )
-                    if converted is not None:
-                        child_stock_converted = (child_stock_converted or 0) + converted
-                        continue
-                in_stock_pieces += child_amount
-
-        # Get unit abbreviation
-        unit_abbrev = pos.get("unit_abbreviation", "")
-        stock_unit_id = product.get("unit_id")
-
-        # Determine status using unit conversions
-        if child_stock_converted is not None:
-            if child_stock_converted >= needed:
-                status = "green"
-            else:
-                status = "red"
-        elif recipe_unit_id and stock_unit_id and recipe_unit_id != stock_unit_id:
-            stock_in_recipe_units = _convert_recipe_to_stock(
-                in_stock_pieces, stock_unit_id, pid, recipe_unit_id, all_conversions
-            )
-            if stock_in_recipe_units is not None:
-                if stock_in_recipe_units >= needed:
-                    status = "yellow" if in_stock_pieces <= 1 and amount_opened >= 1 else "green"
-                else:
-                    status = "red"
-            else:
-                if in_stock_pieces >= 1:
-                    status = "yellow" if amount_opened >= 1 else "green"
-                else:
-                    status = "red"
-        else:
-            if in_stock_pieces >= needed:
-                status = "yellow" if in_stock_pieces == 1 and amount_opened >= 1 else "green"
-            else:
-                status = "red"
-
-        # Get parent product info
-        parent_id = product.get("parent_id")
-        parent_name = None
-        if parent_id:
-            parent = products_by_id.get(int(parent_id))
-            if parent:
-                parent_name = parent.get("name")
-
+    for pos in recipe.get("ingredients", []):
+        a = by_ingredient.get(pos.get("id"), {})
         ingredients.append({
             "id": pos.get("id"),
-            "product_id": pid,
-            "product_name": product_name,
-            "parent_id": parent_id,
-            "parent_name": parent_name,
-            "amount_needed": needed,
-            "unit_abbrev": unit_abbrev,
+            "product_id": pos.get("product_id"),
+            "product_name": pos.get("product_name") or a.get("product_name", ""),
+            "parent_id": a.get("parent_id"),
+            "parent_name": None,
+            "amount_needed": pos.get("amount") or 0,
+            "unit_abbrev": pos.get("unit_abbreviation", ""),
             "note": pos.get("note", ""),
-            "specificity": specificity,
-            "status": status,
+            "specificity": pos.get("specificity", "loose"),
+            "status": a.get("status", "red"),
         })
 
-    # Parse instructions from description
     description = recipe.get("description", "")
     source_url = recipe.get("source_url") or None
     instructions = []
@@ -2488,18 +2228,11 @@ def _handle_scrape(url: str) -> dict:
                 except Exception as exc:
                     log.warning("Failed to create stub product '%s': %s", stub_name, exc)
 
-    # 7. Create product-specific unit conversions via AI (skip stubs)
+    # 7b. Update product default units for products without conversions
+    # (pack-size conversions themselves are created by Storage at product
+    # creation time — see Storage Task 4 — not here at scrape time)
     products = _get_all_products()
     products_by_id = {p["id"]: p for p in products}
-    try:
-        _create_product_conversions(
-            recipe_data["ingredients"], products_by_id,
-            skip_product_ids=stub_product_ids,
-        )
-    except Exception as exc:
-        log.warning("Failed to create product conversions: %s", exc)
-
-    # 7b. Update product default units for products without conversions
     try:
         _update_product_default_units(recipe_data["ingredients"], products_by_id)
     except Exception as exc:
@@ -2519,6 +2252,14 @@ def _handle_scrape(url: str) -> dict:
 
     # 8. Create recipe in Storage
     result = _create_recipe(recipe_data, recipe_data["ingredients"])
+
+    # Order-independence: hand anything this scrape created or left unlinked
+    # to Storage's linker sweep (backfills pack conversions + tree links).
+    try:
+        _api_post("products/reconcile")
+    except Exception as exc:
+        log.warning("Post-scrape reconcile sweep failed: %s", exc)
+
     return result
 
 
