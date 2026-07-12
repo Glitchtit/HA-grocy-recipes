@@ -2256,7 +2256,7 @@ def _handle_scrape(url: str) -> dict:
     # Order-independence: hand anything this scrape created or left unlinked
     # to Storage's linker sweep (backfills pack conversions + tree links).
     try:
-        _api_post("products/reconcile")
+        _api_post("products/reconcile", timeout=120)
     except Exception as exc:
         log.warning("Post-scrape reconcile sweep failed: %s", exc)
 

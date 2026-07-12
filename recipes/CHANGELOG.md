@@ -1,3 +1,7 @@
+## 2.4.1
+
+- Post-scrape linker sweep now has a timeout so a stalled sweep cannot block future scrapes
+
 ## 2.4.0
 
 - Ingredient availability now comes from Storage's new availability endpoint (recursive stock aggregation, pack sizes, staples)
