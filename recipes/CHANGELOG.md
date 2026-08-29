@@ -1,3 +1,7 @@
+## 2.5.1
+
+- Deleting a set now asks "Poista setti?" instead of recipe wording
+
 ## 2.5.0
 
 - New Setit tab: create named quick-add sets of products ("Taco night") and push them onto the shopping list with a checklist — items already in stock or already on the list start unchecked

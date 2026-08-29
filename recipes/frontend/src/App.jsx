@@ -385,7 +385,13 @@ function CookDialog({ recipe, onConfirm, onClose, busy }) {
 // ---------------------------------------------------------------------------
 // DeleteConfirmDialog
 // ---------------------------------------------------------------------------
-function DeleteConfirmDialog({ recipeName, onConfirm, onClose }) {
+function DeleteConfirmDialog({
+  recipeName,
+  onConfirm,
+  onClose,
+  title = 'Poista resepti?',
+  question = 'Haluatko varmasti poistaa reseptin',
+}) {
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm overlay-enter"
@@ -396,10 +402,10 @@ function DeleteConfirmDialog({ recipeName, onConfirm, onClose }) {
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-lg font-bold text-gray-100 text-center mb-2">
-          Poista resepti?
+          {title}
         </h3>
         <p className="text-gray-400 text-sm text-center mb-5">
-          Haluatko varmasti poistaa reseptin{' '}
+          {question}{' '}
           <span className="font-semibold text-gray-200">"{recipeName}"</span>?
         </p>
         <div className="space-y-2">
@@ -1270,6 +1276,8 @@ export default function App() {
           recipeName={bundleDeleteDialog.name}
           onConfirm={handleBundleDeleteConfirm}
           onClose={() => setBundleDeleteDialog(null)}
+          title="Poista setti?"
+          question="Haluatko varmasti poistaa setin"
         />
       )}
 
