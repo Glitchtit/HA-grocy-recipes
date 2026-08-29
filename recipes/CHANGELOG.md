@@ -1,3 +1,8 @@
+## 2.5.0
+
+- New Setit tab: create named quick-add sets of products ("Taco night") and push them onto the shopping list with a checklist — items already in stock or already on the list start unchecked
+- Sets are stored in HA-storage (requires HA-storage 0.24.0+) and are kept separate from recipes
+
 ## 2.4.1
 
 - Post-scrape linker sweep now has a timeout so a stalled sweep cannot block future scrapes

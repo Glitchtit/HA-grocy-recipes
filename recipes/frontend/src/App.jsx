@@ -422,6 +422,245 @@ function DeleteConfirmDialog({ recipeName, onConfirm, onClose }) {
 }
 
 // ---------------------------------------------------------------------------
+// BundleCard — grid item for the Setit tab
+// ---------------------------------------------------------------------------
+function BundleCard({ bundle, onClick, onEdit }) {
+  return (
+    <div className="bg-gray-800 rounded-2xl shadow-lg overflow-hidden relative">
+      <button
+        onClick={onClick}
+        className="w-full text-left p-4 hover:bg-gray-700 transition-colors active:scale-[0.98]"
+      >
+        <div className="text-4xl mb-2">{bundle.emoji || '🧺'}</div>
+        <h3 className="font-semibold text-gray-100 text-sm line-clamp-2">{bundle.name}</h3>
+        <p className="text-gray-400 text-xs mt-1">
+          {bundle.item_count} tuote{bundle.item_count !== 1 ? 'tta' : ''}
+        </p>
+      </button>
+      <button
+        onClick={(e) => { e.stopPropagation(); onEdit(); }}
+        className="absolute top-2 right-2 w-8 h-8 rounded-lg text-gray-400 hover:text-gray-100 hover:bg-gray-700 text-sm"
+        aria-label="Muokkaa"
+        title="Muokkaa"
+      >
+        ✎
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BundlePickerOverlay — checklist push-to-shopping-list
+// Items already in stock or already on the list start unchecked.
+// ---------------------------------------------------------------------------
+function BundlePickerOverlay({ bundle, onConfirm, onClose, busy }) {
+  const [unchecked, setUnchecked] = useState(() => new Set(
+    (bundle.items || [])
+      .filter((i) => i.stock_amount > 0 || i.on_list)
+      .map((i) => i.product_id),
+  ));
+  const toggle = (pid) => {
+    setUnchecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(pid)) next.delete(pid);
+      else next.add(pid);
+      return next;
+    });
+  };
+  const checkedIds = (bundle.items || [])
+    .map((i) => i.product_id)
+    .filter((pid) => !unchecked.has(pid));
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm overlay-enter"
+      onClick={onClose}
+    >
+      <div
+        className="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 overlay-card-enter max-h-[85vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-lg font-bold text-gray-100 text-center mb-1">
+          {bundle.emoji || '🧺'} {bundle.name}
+        </h3>
+        <p className="text-gray-400 text-sm text-center mb-4">
+          Valitse mitkä tuotteet lisätään ostoslistalle.
+        </p>
+        <ul className="space-y-1 mb-5">
+          {(bundle.items || []).map((item) => {
+            const checked = !unchecked.has(item.product_id);
+            const hint = item.on_list ? 'jo listalla'
+              : item.stock_amount > 0 ? 'varastossa' : '';
+            return (
+              <li key={item.id}>
+                <button
+                  onClick={() => toggle(item.product_id)}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm transition-colors ${
+                    checked ? 'bg-gray-700 text-gray-100' : 'bg-gray-900 text-gray-500'
+                  }`}
+                >
+                  <span
+                    className={`w-5 h-5 flex-shrink-0 rounded border-2 flex items-center justify-center text-[11px] ${
+                      checked
+                        ? 'bg-brand-cobalt border-brand-cobalt text-white'
+                        : 'border-gray-600 text-transparent'
+                    }`}
+                  >
+                    ✓
+                  </span>
+                  <span className="flex-1 truncate">{item.product_name}</span>
+                  {hint && <span className="text-[10px] uppercase tracking-wide text-amber-400/80">{hint}</span>}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="space-y-2">
+          <button
+            onClick={() => onConfirm(checkedIds)}
+            disabled={busy || checkedIds.length === 0}
+            className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-brand-cobalt hover:bg-brand-cobalt-400 active:bg-brand-cobalt-600 disabled:opacity-40 transition-colors"
+          >
+            {busy ? 'Lisätään…' : `Lisää ostoslistalle (${checkedIds.length})`}
+          </button>
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="w-full py-2 rounded-xl font-semibold text-gray-400 text-sm hover:text-gray-200 transition-colors"
+          >
+            Peruuta
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BundleEditorOverlay — create / edit a bundle with a product search picker
+// ---------------------------------------------------------------------------
+function BundleEditorOverlay({ bundle, products, onSave, onDelete, onClose, busy }) {
+  const isNew = !bundle?.id;
+  const [name, setName] = useState(bundle?.name || '');
+  const [emoji, setEmoji] = useState(bundle?.emoji || '🧺');
+  const [items, setItems] = useState(() =>
+    (bundle?.items || []).map((i) => ({ product_id: i.product_id, product_name: i.product_name })),
+  );
+  const [query, setQuery] = useState('');
+
+  const itemIds = new Set(items.map((i) => i.product_id));
+  const q = query.trim().toLowerCase();
+  const matches = q.length < 2 ? [] : (products || [])
+    .filter((p) => p.active !== 0 && !itemIds.has(p.id) && p.name.toLowerCase().includes(q))
+    .slice(0, 8);
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm overlay-enter"
+      onClick={onClose}
+    >
+      <div
+        className="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 overlay-card-enter max-h-[85vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-lg font-bold text-gray-100 text-center mb-4">
+          {isNew ? 'Uusi setti' : 'Muokkaa settiä'}
+        </h3>
+        <div className="flex gap-2 mb-3">
+          <input
+            type="text"
+            value={emoji}
+            onChange={(e) => setEmoji(e.target.value)}
+            className="w-16 px-2 py-2 bg-gray-900 border border-gray-700 rounded-lg text-center text-xl"
+            aria-label="Emoji"
+          />
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Setin nimi, esim. Taco night"
+            className="flex-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-cobalt"
+          />
+        </div>
+
+        {/* Chosen products */}
+        {items.length > 0 && (
+          <ul className="space-y-1 mb-3">
+            {items.map((item) => (
+              <li
+                key={item.product_id}
+                className="flex items-center gap-2 px-3 py-2 bg-gray-700 rounded-lg text-sm text-gray-100"
+              >
+                <span className="flex-1 truncate">{item.product_name}</span>
+                <button
+                  onClick={() => setItems((prev) => prev.filter((x) => x.product_id !== item.product_id))}
+                  className="text-gray-400 hover:text-red-400"
+                  aria-label={`Poista ${item.product_name}`}
+                >
+                  ✕
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {/* Product search */}
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Hae tuotetta…"
+          className="w-full px-3 py-2 mb-1 bg-gray-900 border border-gray-700 rounded-lg text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-cobalt"
+        />
+        {matches.length > 0 && (
+          <ul className="mb-3 rounded-lg overflow-hidden border border-gray-700 divide-y divide-gray-700">
+            {matches.map((p) => (
+              <li key={p.id}>
+                <button
+                  onClick={() => {
+                    setItems((prev) => [...prev, { product_id: p.id, product_name: p.name }]);
+                    setQuery('');
+                  }}
+                  className="w-full px-3 py-2 bg-gray-900 hover:bg-gray-700 text-left text-sm text-gray-200"
+                >
+                  ＋ {p.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="space-y-2 mt-4">
+          <button
+            onClick={() => onSave({ name: name.trim(), emoji: emoji.trim() || '🧺', items: items.map((i) => ({ product_id: i.product_id })) })}
+            disabled={busy || !name.trim()}
+            className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-brand-cobalt hover:bg-brand-cobalt-400 active:bg-brand-cobalt-600 disabled:opacity-40 transition-colors"
+          >
+            {busy ? 'Tallennetaan…' : 'Tallenna'}
+          </button>
+          {!isNew && (
+            <button
+              onClick={onDelete}
+              disabled={busy}
+              className="w-full py-2 rounded-xl font-semibold text-red-400 text-sm hover:text-red-300 transition-colors"
+            >
+              Poista setti
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="w-full py-2 rounded-xl font-semibold text-gray-400 text-sm hover:text-gray-200 transition-colors"
+          >
+            Peruuta
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 export default function App() {
@@ -434,6 +673,19 @@ export default function App() {
   const [scraping, setScraping] = useState(false);
   const [url, setUrl] = useState('');
   const [toasts, setToasts] = useState([]);
+
+  // Tabs: 'recipes' | 'bundles'
+  const [tab, setTab] = useState('recipes');
+
+  // Bundles (Setit)
+  const [bundles, setBundles] = useState([]);
+  const [bundlesLoading, setBundlesLoading] = useState(false);
+  const [allProducts, setAllProducts] = useState([]);
+  const [pickerBundle, setPickerBundle] = useState(null);   // BundleDetail
+  const [pickerBusy, setPickerBusy] = useState(false);
+  const [editorBundle, setEditorBundle] = useState(null);   // BundleDetail | {} for new
+  const [editorBusy, setEditorBusy] = useState(false);
+  const [bundleDeleteDialog, setBundleDeleteDialog] = useState(null); // {id, name}
 
   // Detail view
   const [selectedRecipeId, setSelectedRecipeId] = useState(null);
@@ -672,6 +924,102 @@ export default function App() {
     }
   }, [deleteDialog, addToast, closeDetail, loadRecipes]);
 
+  // ── Bundles (Setit) ───────────────────────────────────────────────
+  const loadBundles = useCallback(async () => {
+    setBundlesLoading(true);
+    try {
+      const { data } = await axios.get(`${API_STORAGE}/bundles`);
+      setBundles(Array.isArray(data) ? data : []);
+    } catch {
+      addToast('Settien lataus epäonnistui', 'error');
+    } finally {
+      setBundlesLoading(false);
+    }
+  }, [addToast]);
+
+  useEffect(() => {
+    if (storageReady && tab === 'bundles') {
+      loadBundles();
+      // Product list for the editor's search picker
+      axios.get(`${API_STORAGE}/products`)
+        .then(({ data }) => setAllProducts(Array.isArray(data) ? data : []))
+        .catch(() => {});
+    }
+  }, [storageReady, tab, loadBundles]);
+
+  const openBundlePicker = useCallback(async (id) => {
+    try {
+      const { data } = await axios.get(`${API_STORAGE}/bundles/${id}`);
+      setPickerBundle(data);
+    } catch {
+      addToast('Setin lataus epäonnistui', 'error');
+    }
+  }, [addToast]);
+
+  const handleBundlePush = useCallback(async (productIds) => {
+    if (!pickerBundle) return;
+    setPickerBusy(true);
+    try {
+      const { data } = await axios.post(
+        `${API_STORAGE}/bundles/${pickerBundle.id}/to-shopping`,
+        { product_ids: productIds },
+      );
+      const parts = [`${data.added} tuotetta lisätty ostoslistalle`];
+      if (data.skipped > 0) parts.push(`${data.skipped} jo listalla`);
+      addToast(parts.join(', '), 'success');
+      setPickerBundle(null);
+    } catch {
+      addToast('Ostoslistalle lisäys epäonnistui', 'error');
+    } finally {
+      setPickerBusy(false);
+    }
+  }, [pickerBundle, addToast]);
+
+  const openBundleEditor = useCallback(async (bundle) => {
+    if (!bundle?.id) {
+      setEditorBundle({});
+      return;
+    }
+    try {
+      const { data } = await axios.get(`${API_STORAGE}/bundles/${bundle.id}`);
+      setEditorBundle(data);
+    } catch {
+      addToast('Setin lataus epäonnistui', 'error');
+    }
+  }, [addToast]);
+
+  const handleBundleSave = useCallback(async (payload) => {
+    setEditorBusy(true);
+    try {
+      if (editorBundle?.id) {
+        await axios.put(`${API_STORAGE}/bundles/${editorBundle.id}`, payload);
+      } else {
+        await axios.post(`${API_STORAGE}/bundles`, payload);
+      }
+      addToast(`Setti "${payload.name}" tallennettu`, 'success');
+      setEditorBundle(null);
+      loadBundles();
+    } catch {
+      addToast('Setin tallennus epäonnistui', 'error');
+    } finally {
+      setEditorBusy(false);
+    }
+  }, [editorBundle, addToast, loadBundles]);
+
+  const handleBundleDeleteConfirm = useCallback(async () => {
+    if (!bundleDeleteDialog) return;
+    const { id, name } = bundleDeleteDialog;
+    setBundleDeleteDialog(null);
+    try {
+      await axios.delete(`${API_STORAGE}/bundles/${id}`);
+      addToast(`Setti "${name}" poistettu`, 'success');
+      setEditorBundle(null);
+      loadBundles();
+    } catch {
+      addToast('Setin poisto epäonnistui', 'error');
+    }
+  }, [bundleDeleteDialog, addToast, loadBundles]);
+
   // ── Render ────────────────────────────────────────────────────────
   if (!storageReady && storageChecking) {
     return (
@@ -712,47 +1060,69 @@ export default function App() {
       <header className="sticky top-0 z-30 bg-gray-900/90 backdrop-blur-md border-b border-gray-800 px-4 py-3">
         <h1 className="text-lg font-bold text-center mb-3">🍽️ Recipe</h1>
 
-        {/* URL input */}
-        <div className="flex gap-2">
-          <input
-            type="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleScrape()}
-            placeholder="Liitä reseptin URL..."
-            className="flex-1 px-4 py-2.5 rounded-xl bg-gray-800 border border-gray-700 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            disabled={scraping}
-          />
+        {/* Tabs */}
+        <div className="flex gap-2 mb-3">
           <button
-            onClick={handleScrape}
-            disabled={scraping || !url.trim()}
-            className="px-5 py-2.5 rounded-xl font-semibold text-white text-sm bg-brand-cobalt hover:bg-brand-cobalt-400 active:bg-brand-cobalt-600 transition-colors disabled:opacity-40"
+            onClick={() => setTab('recipes')}
+            className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-colors ${
+              tab === 'recipes' ? 'bg-brand-cobalt text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'
+            }`}
           >
-            {scraping ? (
-              <span className="inline-flex items-center gap-2">
-                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                    fill="none"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                  />
-                </svg>
-                Haetaan...
-              </span>
-            ) : (
-              'Hae'
-            )}
+            🍽️ Reseptit
+          </button>
+          <button
+            onClick={() => setTab('bundles')}
+            className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-colors ${
+              tab === 'bundles' ? 'bg-brand-cobalt text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            🧺 Setit
           </button>
         </div>
+
+        {/* URL input */}
+        {tab === 'recipes' && (
+          <div className="flex gap-2">
+            <input
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleScrape()}
+              placeholder="Liitä reseptin URL..."
+              className="flex-1 px-4 py-2.5 rounded-xl bg-gray-800 border border-gray-700 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              disabled={scraping}
+            />
+            <button
+              onClick={handleScrape}
+              disabled={scraping || !url.trim()}
+              className="px-5 py-2.5 rounded-xl font-semibold text-white text-sm bg-brand-cobalt hover:bg-brand-cobalt-400 active:bg-brand-cobalt-600 transition-colors disabled:opacity-40"
+            >
+              {scraping ? (
+                <span className="inline-flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                      fill="none"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  Haetaan...
+                </span>
+              ) : (
+                'Hae'
+              )}
+            </button>
+          </div>
+        )}
       </header>
 
       {/* Connection lost banner */}
@@ -770,27 +1140,58 @@ export default function App() {
 
       {/* Main content */}
       <main className="px-4 py-4">
-        {loading ? (
-          <div className="flex justify-center py-20">
-            <div className="text-gray-500 text-sm">Ladataan reseptejä...</div>
-          </div>
-        ) : recipes.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="text-6xl mb-4">📖</div>
-            <p className="text-gray-400 text-sm">
-              Ei reseptejä vielä. Liitä reseptin URL ylhäällä aloittaaksesi!
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {recipes.map((r) => (
-              <RecipeCard
-                key={r.id}
-                recipe={r}
-                onClick={() => openRecipe(r.id)}
-              />
-            ))}
-          </div>
+        {tab === 'recipes' && (
+          <>
+            {loading ? (
+              <div className="flex justify-center py-20">
+                <div className="text-gray-500 text-sm">Ladataan reseptejä...</div>
+              </div>
+            ) : recipes.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <div className="text-6xl mb-4">📖</div>
+                <p className="text-gray-400 text-sm">
+                  Ei reseptejä vielä. Liitä reseptin URL ylhäällä aloittaaksesi!
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                {recipes.map((r) => (
+                  <RecipeCard
+                    key={r.id}
+                    recipe={r}
+                    onClick={() => openRecipe(r.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {tab === 'bundles' && (
+          bundlesLoading ? (
+            <div className="flex justify-center py-20">
+              <div className="text-gray-500 text-sm">Ladataan settejä...</div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+              {bundles.map((b) => (
+                <BundleCard
+                  key={b.id}
+                  bundle={b}
+                  onClick={() => openBundlePicker(b.id)}
+                  onEdit={() => openBundleEditor(b)}
+                />
+              ))}
+              {/* New bundle card */}
+              <button
+                onClick={() => openBundleEditor(null)}
+                className="bg-gray-800/50 border-2 border-dashed border-gray-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 text-gray-500 hover:text-gray-300 hover:border-gray-500 transition-colors min-h-[120px]"
+              >
+                <span className="text-3xl">＋</span>
+                <span className="text-sm font-semibold">Uusi setti</span>
+              </button>
+            </div>
+          )
         )}
       </main>
 
@@ -838,6 +1239,37 @@ export default function App() {
           recipeName={deleteDialog.name}
           onConfirm={handleDeleteConfirm}
           onClose={() => setDeleteDialog(null)}
+        />
+      )}
+
+      {/* Bundle picker */}
+      {pickerBundle && (
+        <BundlePickerOverlay
+          bundle={pickerBundle}
+          busy={pickerBusy}
+          onConfirm={handleBundlePush}
+          onClose={() => !pickerBusy && setPickerBundle(null)}
+        />
+      )}
+
+      {/* Bundle editor */}
+      {editorBundle && (
+        <BundleEditorOverlay
+          bundle={editorBundle.id ? editorBundle : null}
+          products={allProducts}
+          busy={editorBusy}
+          onSave={handleBundleSave}
+          onDelete={() => setBundleDeleteDialog({ id: editorBundle.id, name: editorBundle.name })}
+          onClose={() => !editorBusy && setEditorBundle(null)}
+        />
+      )}
+
+      {/* Bundle delete confirm — reuse DeleteConfirmDialog copy pattern */}
+      {bundleDeleteDialog && (
+        <DeleteConfirmDialog
+          recipeName={bundleDeleteDialog.name}
+          onConfirm={handleBundleDeleteConfirm}
+          onClose={() => setBundleDeleteDialog(null)}
         />
       )}
 
