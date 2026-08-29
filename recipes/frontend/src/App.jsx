@@ -551,7 +551,7 @@ function BundleEditorOverlay({ bundle, products, onSave, onDelete, onClose, busy
   const itemIds = new Set(items.map((i) => i.product_id));
   const q = query.trim().toLowerCase();
   const matches = q.length < 2 ? [] : (products || [])
-    .filter((p) => p.active !== 0 && !itemIds.has(p.id) && p.name.toLowerCase().includes(q))
+    .filter((p) => (p.active ?? true) && !itemIds.has(p.id) && p.name.toLowerCase().includes(q))
     .slice(0, 8);
 
   return (
