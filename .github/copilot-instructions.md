@@ -29,6 +29,7 @@ The Dockerfile is a **multi-stage build**: Node 20 builds the React frontend, th
   "gemini_api_key": "str?",
   "gemini_model": "str?",
   "scraper_url": "url?",
+  "flaresolverr_url": "str?",
   "debug": false
 }
 ```
@@ -36,6 +37,7 @@ The Dockerfile is a **multi-stage build**: Node 20 builds the React frontend, th
 - `storage_url` — URL of the HA-Storage addon.
 - `gemini_api_key` / `gemini_model` — optional local overrides. The AI key is fetched from Storage on startup (with retry); local config is fallback only.
 - `scraper_url` — optional Scraper addon URL for product discovery.
+- `flaresolverr_url` — optional FlareSolverr URL (e.g. `http://host:8191`). Recipe pages that answer with a Cloudflare challenge (k-ruoka.fi) are re-fetched through it; without it those scrapes fail with an actionable error.
 
 ## Development
 

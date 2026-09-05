@@ -142,11 +142,17 @@ if bashio::config.has_value 'claude_model'; then
     CLAUDE_MODEL=$(bashio::config 'claude_model')
 fi
 
+FLARESOLVERR_URL=""
+if bashio::config.has_value 'flaresolverr_url'; then
+    FLARESOLVERR_URL=$(bashio::config 'flaresolverr_url')
+    bashio::log.info "FlareSolverr URL: ${FLARESOLVERR_URL}"
+fi
+
 DEBUG="false"
 if bashio::config.true 'debug'; then
     DEBUG="true"
 fi
 
-export STORAGE_URL AI_PROVIDER GEMINI_API_KEY GEMINI_MODEL OLLAMA_URL OLLAMA_MODEL CLAUDE_API_KEY CLAUDE_MODEL DEBUG
+export STORAGE_URL AI_PROVIDER GEMINI_API_KEY GEMINI_MODEL OLLAMA_URL OLLAMA_MODEL CLAUDE_API_KEY CLAUDE_MODEL FLARESOLVERR_URL DEBUG
 
 exec python3 /app/backend.py

@@ -48,6 +48,8 @@ OLLAMA_URL: str = os.environ.get("OLLAMA_URL", "").rstrip("/")
 OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "llama3") or "llama3"
 CLAUDE_API_KEY: str = os.environ.get("CLAUDE_API_KEY", "")
 CLAUDE_MODEL: str = os.environ.get("CLAUDE_MODEL", "claude-3-5-haiku-20241022") or "claude-3-5-haiku-20241022"
+# Optional FlareSolverr instance for Cloudflare-fronted recipe sites (k-ruoka.fi).
+FLARESOLVERR_URL: str = os.environ.get("FLARESOLVERR_URL", "").strip().rstrip("/")
 
 PORT = 8100
 
@@ -983,13 +985,63 @@ def _scraper_discover(product_name: str, search_term: str | None = None) -> dict
 # ---------------------------------------------------------------------------
 # Recipe scraping (Gemini AI)
 # ---------------------------------------------------------------------------
+_FETCH_UA = "Mozilla/5.0 (compatible; RecipeBackend/1.0)"
+
+
+def _is_cloudflare_block(resp) -> bool:
+    """True when *resp* is a Cloudflare challenge/block rather than a real 403."""
+    if resp.status_code not in (403, 503):
+        return False
+    headers = {k.lower(): v for k, v in resp.headers.items()}
+    return bool(headers.get("cf-mitigated")) or "cloudflare" in headers.get("server", "").lower()
+
+
+def _fetch_via_flaresolverr(url: str) -> str:
+    """Fetch *url* through FlareSolverr and return the rendered HTML.
+
+    FlareSolverr solves the Cloudflare challenge in a headless browser and hands
+    back the final page, so no cookie juggling is needed on our side.
+    """
+    base = FLARESOLVERR_URL
+    endpoint = base if base.endswith("/v1") else f"{base}/v1"
+    log.info("Cloudflare challenge on %s — fetching via FlareSolverr at %s", url, endpoint)
+    r = requests.post(
+        endpoint,
+        json={"cmd": "request.get", "url": url, "maxTimeout": 90000},
+        timeout=120,
+    )
+    r.raise_for_status()
+    data = r.json()
+    if data.get("status") != "ok":
+        raise RuntimeError(f"FlareSolverr could not fetch page: {data.get('message') or data}")
+    solution = data.get("solution") or {}
+    status = solution.get("status")
+    if status and int(status) >= 400:
+        raise RuntimeError(f"FlareSolverr fetched page but site answered HTTP {status}")
+    html = solution.get("response") or ""
+    if not html:
+        raise RuntimeError("FlareSolverr returned an empty page")
+    return html
+
+
+def _fetch_html(url: str) -> str:
+    """Fetch a page's HTML, routing Cloudflare-blocked sites through FlareSolverr."""
+    r = requests.get(url, timeout=15, headers={"User-Agent": _FETCH_UA})
+    if _is_cloudflare_block(r):
+        if FLARESOLVERR_URL:
+            return _fetch_via_flaresolverr(url)
+        host = urlparse(url).netloc or url
+        raise RuntimeError(
+            f"{host} is protected by Cloudflare and blocked the request. "
+            "Set flaresolverr_url in the add-on options to scrape this site."
+        )
+    r.raise_for_status()
+    return r.text
+
+
 def _fetch_page(url: str) -> str:
     """Fetch a web page and return cleaned text content."""
-    r = requests.get(url, timeout=15, headers={
-        "User-Agent": "Mozilla/5.0 (compatible; RecipeBackend/1.0)"
-    })
-    r.raise_for_status()
-    soup = BeautifulSoup(r.text, "html.parser")
+    soup = BeautifulSoup(_fetch_html(url), "html.parser")
     # Remove script/style tags
     for tag in soup(["script", "style", "nav", "footer", "header"]):
         tag.decompose()
@@ -1000,10 +1052,7 @@ def _extract_image_url(url: str, html: str | None = None) -> str | None:
     """Try to extract the main recipe image from the page."""
     try:
         if html is None:
-            r = requests.get(url, timeout=10, headers={
-                "User-Agent": "Mozilla/5.0 (compatible; RecipeBackend/1.0)"
-            })
-            html = r.text
+            html = _fetch_html(url)
         soup = BeautifulSoup(html, "html.parser")
         # Try og:image first
         og = soup.find("meta", property="og:image")
@@ -1312,11 +1361,7 @@ def _scrape_recipe(url: str) -> dict:
 
     Returns: {name, image_url, servings, source_url, ingredients: [{name, amount, unit, note}], instructions: [str]}
     """
-    r = requests.get(url, timeout=15, headers={
-        "User-Agent": "Mozilla/5.0 (compatible; RecipeBackend/1.0)"
-    })
-    r.raise_for_status()
-    raw_html = r.text
+    raw_html = _fetch_html(url)
     image_url = _extract_image_url(url, raw_html)
 
     page_text = BeautifulSoup(raw_html, "html.parser").get_text(separator="\n", strip=True)[:8000]

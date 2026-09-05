@@ -1,3 +1,8 @@
+## 2.6.0
+
+- Scraping Cloudflare-protected recipe sites (k-ruoka.fi) no longer fails with 403: set the new `flaresolverr_url` option (same FlareSolverr instance HA-scraper uses) and blocked pages are fetched through it automatically
+- Without FlareSolverr configured, a Cloudflare block now gives a clear error instead of a bare HTTPError
+
 ## 2.5.1
 
 - Deleting a set now asks "Poista setti?" instead of recipe wording

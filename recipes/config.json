@@ -1,6 +1,6 @@
 {
   "name": "Recipe",
-  "version": "2.5.1",
+  "version": "2.6.0",
   "slug": "recipes",
   "description": "AI-powered recipe scraper with smart shopping lists",
   "url": "https://github.com/Glitchtit/HA-recipes",
@@ -29,6 +29,7 @@
     "ollama_model": "llama3",
     "claude_api_key": "",
     "claude_model": "claude-3-5-haiku-20241022",
+    "flaresolverr_url": "",
     "debug": false
   },
   "schema": {
@@ -42,6 +43,7 @@
     "claude_model": "str?",
     "scraper_url": "url?",
     "print_url": "str?",
+    "flaresolverr_url": "str?",
     "debug": "bool?"
   }
 }
