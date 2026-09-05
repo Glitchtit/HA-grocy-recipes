@@ -3,3 +3,6 @@ dist/
 __pycache__/
 *.pyc
 .env
+
+# Superpowers subagent task reports
+.superpowers-task-*-report.md
